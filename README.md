@@ -1,4 +1,3 @@
-# G1dseye
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -485,7 +484,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .cfg-close{width:84px;height:34px;background:var(--bg3);color:var(--t2);border:1px solid var(--b2);border-radius:3px;font-size:12px;cursor:pointer}
 #cfg-status{font-size:10px;margin-top:8px;color:#5cc85c;display:none}
 input,select,textarea{font-size:16px}
+#map-gl{position:absolute;inset:0}
+#mw.gl #mc{position:absolute;inset:0;pointer-events:none;z-index:2}
+#minfo{color:rgba(255,255,255,.4)!important;white-space:pre;z-index:5}
+#htip{z-index:6}
+.maplibregl-ctrl-attrib{background:rgba(8,8,8,.75)!important;font-size:9px}
+.maplibregl-ctrl-attrib,.maplibregl-ctrl-attrib a{color:#999!important}
+.maplibregl-ctrl-group{background:#141414!important;border:1px solid #282828}
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon{filter:invert(1)}
 </style>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 </head>
 <body>
 <div id="cfg-modal"><div id="cfg-box">
@@ -547,6 +556,7 @@ input,select,textarea{font-size:16px}
       <button class="rb" data-r="world">Monde</button>
     </div>
   </div>
+  <div class="cg"><span class="cg-lbl">Fond</span><button class="rb bm on" data-bm="dark" onclick="setBasemap('dark',this)">Sombre</button><button class="rb bm" data-bm="light" onclick="setBasemap('light',this)">Clair</button><button class="rb bm" data-bm="osm" onclick="setBasemap('osm',this)">Rues</button><button class="rb bm" data-bm="sat" onclick="setBasemap('sat',this)">Satellite</button></div>
   <div class="cs"><span class="cs-lbl">Total</span><span class="cs-val g" id="sv-tot">-</span></div>
   <div class="cs"><span class="cs-lbl">Militaire</span><span class="cs-val r" id="sv-mil">-</span></div>
   <div class="cs"><span class="cs-lbl">Commercial</span><span class="cs-val" id="sv-com">-</span></div>
@@ -663,6 +673,7 @@ input,select,textarea{font-size:16px}
 
   <!-- Map -->
   <div id="mw">
+    <div id="map-gl"></div>
     <canvas id="mc"></canvas>
     <div id="minfo"></div>
     <div id="leg">
@@ -1258,6 +1269,8 @@ let trails={},fullT={},meta={};
 let refInt=null,src="",aiOpen=false,lastAiCS="",activeTab="route";
 let lastAPiata="",apAiLoaded=false,activeAPTab="overview";
 let currentView="2d";
+let gl=null,currentBM="dark",drawQ=false;
+const REGION_PRESETS=JSON.parse(JSON.stringify(REGIONS));
 
 // Globe state
 let gViewer=null,globeInited=false;
@@ -1273,7 +1286,10 @@ const fSpd=ms=>ms?Math.round(ms*3.6):"N/A";
 const fVR=v=>(v==null)?"N/A":`${v>0?"+":""}${v.toFixed(1)}`;
 function fHdg(h){if(!h)return"N/A";const d=["N","NE","E","SE","S","SO","O","NO"];return`${Math.round(h)}deg ${d[Math.round(h/45)%8]}`;}
 function ago(ts){if(!ts)return"";const d=Math.floor(Date.now()/1000)-ts;return d<60?`${d}s`:`${Math.floor(d/60)}m`;}
-function ll2xy(lat,lon,b,w,h){return{x:((lon-b.minLon)/(b.maxLon-b.minLon))*w,y:((b.maxLat-lat)/(b.maxLat-b.minLat))*h};}
+function ll2xy(lat,lon,b,w,h){
+  if(gl&&b===REGIONS[region]){const q=gl.project([lon,lat]);return{x:q.x,y:q.y};}
+  return{x:((lon-b.minLon)/(b.maxLon-b.minLon))*w,y:((b.maxLat-lat)/(b.maxLat-b.minLat))*h};
+}
 function fDur(m){if(!m||isNaN(m))return"-";return`${Math.floor(m/60)}h${String(Math.round(m%60)).padStart(2,"0")}`;}
 function addM(t,m){if(!t||t==="--:--")return"-";const[h,mn]=t.split(":").map(Number),tot=h*60+mn+m;return`${String(Math.floor(tot/60)%24).padStart(2,"0")}:${String(tot%60).padStart(2,"0")}`;}
 
@@ -1411,7 +1427,7 @@ function renderList(){
 
 // ===== PICK =====
 function pick(f){
-  sel=f;selAP=null;renderList();drawMap();showDetail(f);
+  sel=f;selAP=null;renderList();drawMap();showDetail(f);centerOn(f.latitude,f.longitude);
   if(globeInited)updateGlobeFlights();
 }
 
@@ -1443,7 +1459,7 @@ function showPanelEmpty(){document.getElementById("det-empty").style.display="fl
 
 // ===== AIRPORT PICK =====
 function pickAirport(ap){
-  selAP=ap;sel=null;renderList();drawMap();
+  selAP=ap;sel=null;renderList();drawMap();centerOn(ap.lat,ap.lon);
   setAirportMode();openDet();
   document.querySelectorAll(".det-tab-dot").forEach(d=>d.style.background="#4fa3e0");
   document.querySelector(".det-tab-txt").textContent="AEROPORT";
@@ -1633,6 +1649,7 @@ function resizeMap(){
   const mw=document.getElementById("mw");
   if(currentView!=="2d")return;
   cvs.width=mw.clientWidth;cvs.height=mw.clientHeight;
+  if(gl)gl.resize();
   drawMap();
 }
 window.addEventListener("resize",resizeMap);
@@ -1642,10 +1659,13 @@ function drawMap(){
   const b=REGIONS[region],w=cvs.width,h=cvs.height;
   if(!w||!h)return;
   const ctx=cvs.getContext("2d");
-  ctx.fillStyle="#060606";ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle="rgba(255,255,255,.028)";ctx.lineWidth=1;
-  for(let i=0;i<w;i+=60){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,h);ctx.stroke();}
-  for(let j=0;j<h;j+=60){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(w,j);ctx.stroke();}
+  if(gl){ctx.clearRect(0,0,w,h);}
+  else{
+    ctx.fillStyle="#060606";ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle="rgba(255,255,255,.028)";ctx.lineWidth=1;
+    for(let i=0;i<w;i+=60){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,h);ctx.stroke();}
+    for(let j=0;j<h;j+=60){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(w,j);ctx.stroke();}
+  }
   // Airports
   const visAP=AIRPORTS.filter(ap=>{const ms=region==="world"?1:2;return ap.lat>=b.minLat&&ap.lat<=b.maxLat&&ap.lon>=b.minLon&&ap.lon<=b.maxLon&&ap.size<=ms;});
   visAP.forEach(ap=>{
@@ -1690,7 +1710,7 @@ function drawMap(){
   if(showPorts) drawPortsOnMap(ctx,b,w,h);
   if(showShips) drawShipsOnMap(ctx,b,w,h);
 
-  document.getElementById("minfo").textContent=`${b.minLat}deg-${b.maxLat}deg N  |  ${b.minLon}deg-${b.maxLon}deg\n${filt.length} vols  |  ${vessels.length} navires  |  ${filt.filter(f=>f.type==="military").length} mil. aer.`;
+  document.getElementById("minfo").textContent=`${b.minLat}deg-${b.maxLat}deg N  |  ${b.minLon}deg-${b.maxLon}deg\n${filt.length} vols  |  ${vessels.length} navires  |  ${filt.filter(f=>f.type==="military").length} mil. aer.${src==="DEMO"?"  [AVIONS SIMULES]":""}${aisConnected?"":"  [NAVIRES SIMULES]"}`;
 }
 
 // ===== MAP EVENTS =====
@@ -1725,7 +1745,7 @@ cvs.addEventListener("click",ev=>{
 // ===== REGION / CHIPS =====
 document.getElementById("regions").addEventListener("click",e=>{
   const btn=e.target.closest(".rb");if(!btn)return;
-  document.querySelectorAll(".rb").forEach(b=>b.classList.remove("on"));btn.classList.add("on");region=btn.dataset.r;
+  document.querySelectorAll("#regions .rb").forEach(b=>b.classList.remove("on"));btn.classList.add("on");region=btn.dataset.r;fitRegion();
   sel=null;selAP=null;selShip=null;selPort=null;trails={};fullT={};meta={};shipTrails={};
   showPanelEmpty();
   document.getElementById("loader").style.display="flex";
@@ -2365,7 +2385,7 @@ cvs.addEventListener("mousemove",e=>{
 // ===== PICK SHIP =====
 function pickShip(v){
   selShip=v;sel=null;selAP=null;selPort=null;
-  renderList();drawMap();
+  renderList();drawMap();centerOn(v.latitude,v.longitude);
   setShipMode();openDet();
   document.querySelectorAll(".det-tab-dot").forEach(d=>d.style.background=SC[v.type]?.c||"#8090a0");
   document.querySelector(".det-tab-txt").textContent="NAVIRE";
@@ -2411,7 +2431,7 @@ function pickShip(v){
 // ===== PICK PORT =====
 function pickPort(p){
   selPort=p;selShip=null;sel=null;selAP=null;
-  drawMap();setPortMode();openDet();
+  drawMap();centerOn(p.lat,p.lon);setPortMode();openDet();
   document.querySelectorAll(".det-tab-dot").forEach(d=>d.style.background="#d4a020");
   document.querySelector(".det-tab-txt").textContent="PORT";
   document.getElementById("port-name").textContent=p.name;
@@ -2886,12 +2906,67 @@ function initMaritime(){
 
 // ============================================================
 // ===== INIT =====
+// ============================================================
+// ===== MOTEUR CARTOGRAPHIQUE 2D (MapLibre GL) =====
+// Les icones/trajectoires restent dessinees par le canvas overlay,
+// mais projetees par MapLibre (zoom, pan, rotation, tuiles reelles).
+// ============================================================
+const BASEMAPS={
+  dark:{tiles:["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png","https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"],attr:"&copy; OpenStreetMap &copy; CARTO",max:19},
+  light:{tiles:["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png","https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],attr:"&copy; OpenStreetMap &copy; CARTO",max:19},
+  osm:{tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],attr:"&copy; OpenStreetMap contributors",max:19},
+  sat:{tiles:["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],attr:"Imagery &copy; Esri, Maxar, Earthstar Geographics",max:19}
+};
+function queueDraw(){if(drawQ)return;drawQ=true;requestAnimationFrame(()=>{drawQ=false;drawMap();});}
+function initGL(){
+  if(gl||typeof maplibregl==="undefined"){if(typeof maplibregl==="undefined")console.warn("MapLibre indisponible: rendu canvas de secours");return;}
+  const sources={},layers=[{id:"bg",type:"background",paint:{"background-color":"#060606"}}];
+  Object.keys(BASEMAPS).forEach(k=>{
+    sources["bm-"+k]={type:"raster",tiles:BASEMAPS[k].tiles,tileSize:256,maxzoom:BASEMAPS[k].max,attribution:BASEMAPS[k].attr};
+    layers.push({id:"bm-"+k,type:"raster",source:"bm-"+k,layout:{visibility:k===currentBM?"visible":"none"}});
+  });
+  try{
+    gl=new maplibregl.Map({container:"map-gl",style:{version:8,sources,layers},center:[10,48],zoom:3,maxPitch:60,attributionControl:{compact:true}});
+  }catch(e){console.warn("MapLibre init:",e);gl=null;return;}
+  document.getElementById("mw").classList.add("gl");
+  gl.addControl(new maplibregl.NavigationControl({visualizePitch:true}),"top-right");
+  gl.addControl(new maplibregl.ScaleControl({unit:"metric"}),"bottom-right");
+  gl.on("move",queueDraw);
+  gl.on("resize",queueDraw);
+  // Le viewport devient la zone interrogee (API avions / AIS / filtres)
+  gl.on("moveend",()=>{
+    const bd=gl.getBounds(),R=REGIONS[region];
+    R.minLat=Math.max(-85,bd.getSouth());R.maxLat=Math.min(85,bd.getNorth());
+    R.minLon=Math.max(-180,bd.getWest());R.maxLon=Math.min(180,bd.getEast());
+    drawMap();
+  });
+  const fwd=(type,oe)=>{if(!oe)return;cvs.dispatchEvent(new MouseEvent(type,{clientX:oe.clientX,clientY:oe.clientY}));gl.getCanvas().style.cursor=cvs.style.cursor==="pointer"?"pointer":"";};
+  gl.on("mousemove",e=>fwd("mousemove",e.originalEvent));
+  gl.on("click",e=>fwd("click",e.originalEvent));
+  gl.getCanvas().addEventListener("mouseleave",()=>cvs.dispatchEvent(new MouseEvent("mouseleave")));
+  fitRegion(0);
+}
+function fitRegion(dur){
+  if(!gl)return;
+  const b=REGION_PRESETS[region];
+  gl.fitBounds([[b.minLon,Math.max(-80,b.minLat)],[b.maxLon,Math.min(80,b.maxLat)]],{padding:20,duration:dur==null?900:dur});
+}
+function setBasemap(k,btn){
+  currentBM=k;
+  document.querySelectorAll(".bm").forEach(b=>b.classList.toggle("on",b===btn));
+  if(!gl)return;
+  Object.keys(BASEMAPS).forEach(id=>gl.setLayoutProperty("bm-"+id,"visibility",id===k?"visible":"none"));
+}
+function centerOn(lat,lon){if(gl&&currentView==="2d"&&lat!=null&&lon!=null)gl.easeTo({center:[lon,lat],duration:700});}
+
 showPanelEmpty();
 if(CFG.aisStream){const ak=document.getElementById('ais-key');if(ak)ak.value=CFG.aisStream;}
 if(CFG.cesium){const it=document.getElementById('ion-token');if(it)it.value=CFG.cesium;}
 setSbMode('aerial');
 loadFlights();
 refInt=setInterval(loadFlights, 15000);
+resizeMap();
+initGL();
 resizeMap();
 initMaritime();
 if(CFG.aisStream)setTimeout(connectAISStream,1500);
