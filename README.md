@@ -6,9 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GOD'S EYE — Aerial & Maritime Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script>window.CESIUM_BASE_URL='https://unpkg.com/cesium/Build/Cesium/';</script>
-<script src="https://unpkg.com/cesium/Build/Cesium/Cesium.js"></script>
-<link href="https://unpkg.com/cesium/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script>window.CESIUM_BASE_URL='https://unpkg.com/cesium@1.106.0/Build/Cesium/';</script>
+<script src="https://unpkg.com/cesium@1.106.0/Build/Cesium/Cesium.js"></script>
+<link href="https://unpkg.com/cesium@1.106.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
 :root{
   --bg0:#060606;--bg1:#0d0d0d;--bg2:#141414;--bg3:#1b1b1b;--bg4:#222222;--bg5:#2a2a2a;
@@ -471,9 +471,41 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.96);z-index:9999;display:none;align-items:center;justify-content:center;cursor:pointer}
 #lb.on{display:flex}
 #lb img{max-width:90vw;max-height:90vh;border-radius:4px;border:1px solid var(--b2)}
+
+/* ===== CONFIG MODAL ===== */
+#cfg-modal{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:10000;display:none;align-items:center;justify-content:center;padding:12px}
+#cfg-modal.open{display:flex}
+#cfg-box{background:var(--bg2);border:1px solid var(--b2);border-radius:5px;padding:18px;width:430px;max-width:100%;max-height:92vh;overflow-y:auto}
+.cfg-title{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--acc);margin-bottom:6px;font-family:'JetBrains Mono',monospace}
+.cfg-label{font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin:12px 0 4px;display:block}
+.cfg-input{width:100%;height:32px;padding:0 9px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:3px;font-size:16px;font-family:'JetBrains Mono',monospace;outline:none}
+.cfg-hint{font-size:9px;color:var(--t4);margin-top:3px;line-height:1.5}
+.cfg-actions{display:flex;gap:8px;margin-top:16px}
+.cfg-save{flex:1;height:34px;background:var(--acc);color:#060606;border:none;border-radius:3px;font-size:12px;font-weight:700;cursor:pointer}
+.cfg-close{width:84px;height:34px;background:var(--bg3);color:var(--t2);border:1px solid var(--b2);border-radius:3px;font-size:12px;cursor:pointer}
+#cfg-status{font-size:10px;margin-top:8px;color:#5cc85c;display:none}
+input,select,textarea{font-size:16px}
 </style>
 </head>
 <body>
+<div id="cfg-modal"><div id="cfg-box">
+<div class="cfg-title">CONFIGURATION</div>
+<div class="cfg-hint">Les cles sont stockees uniquement dans ton navigateur (localStorage), jamais dans le code GitHub.</div>
+<label class="cfg-label">Cle API Anthropic (analyses IA)</label>
+<input class="cfg-input" id="cfg-anthr" placeholder="sk-ant-..." autocapitalize="off" autocorrect="off">
+<div class="cfg-hint">console.anthropic.com — necessaire pour les onglets IA vol / navire / port / aeroport</div>
+<label class="cfg-label">Cle AISStream.io (navires en direct)</label>
+<input class="cfg-input" id="cfg-ais" placeholder="cle AISStream" autocapitalize="off" autocorrect="off">
+<div class="cfg-hint">aisstream.io — gratuit. Sans cle : navires simules (mode demo)</div>
+<label class="cfg-label">Proxy OpenSky (optionnel)</label>
+<input class="cfg-input" id="cfg-proxy" placeholder="https://mon-proxy.onrender.com" autocapitalize="off" autocorrect="off">
+<div class="cfg-hint">proxy.py sur Render.com — evite les blocages CORS pour les avions live</div>
+<label class="cfg-label">Token Cesium Ion (optionnel)</label>
+<input class="cfg-input" id="cfg-cesium" placeholder="eyJhbGci..." autocapitalize="off" autocorrect="off">
+<div class="cfg-hint">cesium.com/ion — batiments 3D</div>
+<div id="cfg-status">Enregistre.</div>
+<div class="cfg-actions"><button class="cfg-save" onclick="saveCfg()">Enregistrer</button><button class="cfg-close" onclick="closeCfg()">Fermer</button></div>
+</div></div>
 
 <div id="lb" onclick="this.classList.remove('on')"><img id="lb-img" src="" alt=""></div>
 
@@ -499,6 +531,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
       <div style="display:flex;align-items:center;gap:5px"><span>ADS-B</span><span style="color:var(--t4);font-size:9px" onclick="togDiag()">Diag</span></div>
       <div id="diag-p" style="display:none;font-size:9px;color:var(--t4)">Src: <span id="src-lbl">-</span><div id="diag-log" style="max-height:60px;overflow-y:auto;line-height:1.6"></div></div>
     </div>
+    <button class="mb-btn" onclick="openCfg()">Config</button>
     <button class="mb-btn" id="ref-btn">Actualiser</button>
   </div>
 </div>
@@ -1096,7 +1129,39 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 // GOD'S EYE v3.0 — COMBINED 2D + 3D INTELLIGENCE PLATFORM
 // ============================================================
 
-const MY_PROXY = "";
+// ===== CONFIG (localStorage) =====
+const CFG_KEY="godseye_cfg_v1";
+const AI_MODEL="claude-sonnet-5-5";
+let CFG={anthropic:"",aisStream:"",proxy:"",cesium:""};
+try{const s=localStorage.getItem(CFG_KEY);if(s)CFG=Object.assign(CFG,JSON.parse(s));}catch(e){}
+function saveCfgLS(){try{localStorage.setItem(CFG_KEY,JSON.stringify(CFG));}catch(e){}}
+function openCfg(){
+  document.getElementById("cfg-anthr").value=CFG.anthropic;
+  document.getElementById("cfg-ais").value=CFG.aisStream;
+  document.getElementById("cfg-proxy").value=CFG.proxy;
+  document.getElementById("cfg-cesium").value=CFG.cesium;
+  document.getElementById("cfg-modal").classList.add("open");
+}
+function closeCfg(){document.getElementById("cfg-modal").classList.remove("open");}
+function saveCfg(){
+  CFG.anthropic=document.getElementById("cfg-anthr").value.trim();
+  CFG.aisStream=document.getElementById("cfg-ais").value.trim();
+  CFG.proxy=document.getElementById("cfg-proxy").value.trim().replace(/\/$/,"");
+  CFG.cesium=document.getElementById("cfg-cesium").value.trim();
+  saveCfgLS();
+  const ak=document.getElementById("ais-key");if(ak)ak.value=CFG.aisStream;
+  const it=document.getElementById("ion-token");if(it)it.value=CFG.cesium;
+  if(CFG.cesium&&typeof Cesium!=="undefined")Cesium.Ion.defaultAccessToken=CFG.cesium;
+  const st=document.getElementById("cfg-status");st.style.display="block";setTimeout(()=>st.style.display="none",2500);
+  if(CFG.aisStream)connectAISStream();
+  loadFlights();
+}
+function aiHeaders(){
+  if(!CFG.anthropic)throw new Error("Cle API Anthropic manquante - ouvre Config");
+  return {"Content-Type":"application/json","x-api-key":CFG.anthropic,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"};
+}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeCfg();});
+
 
 // ===== SHARED DATA =====
 const AIRPORTS=[
@@ -1267,7 +1332,7 @@ function genDemo(b){
 
 // ===== FETCH =====
 async function tryFetch(url){
-  if(MY_PROXY){try{const r=await fetch(`${MY_PROXY}/flights?region=${region}`,{signal:AbortSignal.timeout(10000)});if(r.ok){const d=await r.json();if(d?.states?.length>0){src="PROXY";return d;}}}catch(e){dlog("Proxy: "+e.message,false);}}
+  if(CFG.proxy){try{const r=await fetch(`${CFG.proxy}/flights?region=${region}`,{signal:AbortSignal.timeout(10000)});if(r.ok){const d=await r.json();if(d?.states?.length>0){src="PROXY";return d;}}}catch(e){dlog("Proxy: "+e.message,false);}}
   dlog("Direct OpenSky",null);
   try{const r=await fetch(url,{signal:AbortSignal.timeout(8000)});if(r.ok){const d=await r.json();if(d?.states?.length>0){src="LIVE";dlog("Direct OK",true);return d;}}else dlog("HTTP "+r.status,false);}catch(e){dlog(e.message,false);}
   for(const[n,fn]of[["allorigins",u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`],["corsproxy",u=>`https://corsproxy.io/?${encodeURIComponent(u)}`]]){
@@ -1419,7 +1484,7 @@ async function loadAirportAI(ap){
   const prompt=`Expert aéroports. Analyse ${ap.name} (${ap.iata}/${ap.icao}), ${ap.city}, ${ap.country}. Utilise la recherche web. Réponds UNIQUEMENT en JSON valide (sans markdown):
 {"annualPassengers":"","annualFlights":"","founded":"","terminals":"","surface":"","director":"","ceo_since":"","staffTotal":"","staffBreakdown":[{"role":"","count":"","pct":10}],"shareholders":[{"name":"","pct":"","type":""}],"runways":[{"name":"","length":"","surface":"","status":""}],"hubAirlines":[],"iataCode":"${ap.iata}","icaoCode":"${ap.icao}","website":"","city":"${ap.city}","country":"${ap.country}","altitude":"","summary":"3-4 phrases"}`;
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:aiHeaders(),body:JSON.stringify({model:AI_MODEL,max_tokens:2000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const d=await res.json();
     const txt=d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
@@ -1516,7 +1581,7 @@ async function fetchAI(f){
   const prompt=`Expert analyse de vol. Vol ${f.callsign} (ICAO: ${f.icao24}), pays: ${f.origin_country}, altitude: ${Math.round(f.baro_altitude||0)}m, vitesse: ${Math.round((f.velocity||0)*3.6)}km/h, cap: ${Math.round(f.heading||0)}deg, position: lat=${f.latitude?.toFixed(3)} lon=${f.longitude?.toFixed(3)}. Utilise la recherche web. Reponds UNIQUEMENT en JSON valide sans markdown:
 {"flightNum":"","airline":"","registration":"","aircraft":"","seats":0,"depCode":"","depName":"","depTime":"","arrCode":"","arrName":"","arrTime":"","totalMin":0,"elapsedMin":0,"etaLocal":"","alliance":"","yearDelivered":"","passengers":"","summary":"2-3 phrases"}`;
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:aiHeaders(),body:JSON.stringify({model:AI_MODEL,max_tokens:1000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
     if(!res.ok)throw new Error("API HTTP "+res.status);
     const d=await res.json();
     const txt=d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
@@ -1577,7 +1642,7 @@ function drawMap(){
   const b=REGIONS[region],w=cvs.width,h=cvs.height;
   if(!w||!h)return;
   const ctx=cvs.getContext("2d");
-  ctx.fillStyle="var(--bg0)";ctx.fillRect(0,0,w,h);
+  ctx.fillStyle="#060606";ctx.fillRect(0,0,w,h);
   ctx.strokeStyle="rgba(255,255,255,.028)";ctx.lineWidth=1;
   for(let i=0;i<w;i+=60){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,h);ctx.stroke();}
   for(let j=0;j<h;j+=60){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(w,j);ctx.stroke();}
@@ -1648,7 +1713,8 @@ cvs.addEventListener("mousemove",e=>{
   else tip.style.display="none";
 });
 cvs.addEventListener("mouseleave",()=>{hov=null;hovAP=null;document.getElementById("htip").style.display="none";cvs.style.cursor="crosshair";drawMap();});
-cvs.addEventListener("click",()=>{
+cvs.addEventListener("click",ev=>{
+  cvs.dispatchEvent(new MouseEvent("mousemove",{clientX:ev.clientX,clientY:ev.clientY}));
   // Priority: flight > airport > ship > port
   if(hov)pick(hov);
   else if(hovAP)pickAirport(hovAP);
@@ -1708,7 +1774,7 @@ function initGlobe(){
   if(globeInited)return;
   globeInited=true;
   const loader=document.getElementById("globe-loader");
-  Cesium.Ion.defaultAccessToken="";
+  Cesium.Ion.defaultAccessToken=CFG.cesium||"";
   gViewer=new Cesium.Viewer("cesiumContainer",{
     terrainProvider:new Cesium.EllipsoidTerrainProvider(),
     baseLayerPicker:false,geocoder:false,homeButton:false,
@@ -1881,7 +1947,7 @@ function toggleClouds(v){
   if(v&&!cloudLayer){cloudLayer=gViewer.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({url:"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi",layers:"MODIS_Terra_CorrectedReflectance_TrueColor",parameters:{transparent:true,format:"image/png"},tilingScheme:new Cesium.GeographicTilingScheme()}));cloudLayer.alpha=0.32;}
   else if(cloudLayer)cloudLayer.show=v;
 }
-function applyIonToken(){const tok=document.getElementById("ion-token").value.trim();if(!tok){globeNotif("Token vide","#c44040");return;}if(gViewer)Cesium.Ion.defaultAccessToken=tok;document.getElementById("ion-status").textContent="Token appliqué";globeNotif("Token Cesium Ion configuré","#3a9a3a");}
+function applyIonToken(){const tok=document.getElementById("ion-token").value.trim();CFG.cesium=tok;saveCfgLS();if(!tok){globeNotif("Token vide","#c44040");return;}if(gViewer)Cesium.Ion.defaultAccessToken=tok;document.getElementById("ion-status").textContent="Token appliqué";globeNotif("Token Cesium Ion configuré","#3a9a3a");}
 function setGlobeTypeFilter(t,btn){document.querySelectorAll("#gctrl .fchip").forEach(b=>b.classList.remove("on"));if(btn)btn.classList.add("on");gTypeFilter=t;updateGlobeFlights();}
 function updateGlobeAltFilter(){const mn=parseInt(document.getElementById("galt-min").value),mx=parseInt(document.getElementById("galt-max").value);document.getElementById("galt-min-lbl").textContent=mn.toLocaleString("fr-FR")+" ft";document.getElementById("galt-max-lbl").textContent=mx.toLocaleString("fr-FR")+" ft";gAltMin=mn;gAltMax=mx;updateGlobeFlights();}
 function globeFlyHome(){if(!gViewer)return;gViewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(10,46,8000000),orientation:{heading:0,pitch:-Cesium.Math.PI_OVER_TWO*.9,roll:0},duration:2});}
@@ -2167,7 +2233,7 @@ async function loadVessels(){
 
 // AISStream.io WebSocket
 function connectAISStream(){
-  const key=document.getElementById("ais-key").value.trim();
+  const key=(document.getElementById("ais-key").value.trim()||CFG.aisStream);CFG.aisStream=key;saveCfgLS();
   if(!key){showGlobeNotif("Entrez votre clé AISStream.io","#c44040");return;}
   if(aisWs)aisWs.close();
   document.getElementById("ais-status").textContent="Connexion...";
@@ -2448,7 +2514,7 @@ async function loadShipAI(v){
 Réponds UNIQUEMENT en JSON valide sans markdown:
 {"description":"description complète du navire et de son opérateur","role_economique":"rôle et importance économique","historique":"historique probable du navire et de ses routes","cargaison_probable":"estimation de la cargaison selon type et route","analyse_trajet":"analyse du trajet actuel et destination","importance_strategique":"importance stratégique ou économique","armateur":"nom de l'armateur ou compagnie","construction":"année de construction estimée","valeur_estimee":"valeur commerciale estimée du navire et cargaison"}`;
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:aiHeaders(),body:JSON.stringify({model:AI_MODEL,max_tokens:1500,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const d=await res.json();const txt=d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
     let info={};try{const m=txt.match(/\{[\s\S]*\}/);if(m)info=JSON.parse(m[0]);}catch(e){sm.textContent=txt;ld.style.display="none";return;}
@@ -2465,7 +2531,7 @@ async function loadPortAI(p){
   const prompt=`Expert logistique portuaire. Analyse le port de ${p.name}, ${p.country}. Utilise la recherche web. Réponds UNIQUEMENT en JSON valide sans markdown:
 {"summary":"résumé stratégique et économique du port en 3-4 phrases","principales_routes":"principales routes maritimes desservies","compagnies":"principales compagnies maritimes utilisant ce port","concurrents":"ports concurrents","projets_recents":"projets d'expansion ou actualités récentes","importance":"importance géopolitique et économique","trafic_detail":"détail du trafic par type de marchandise"}`;
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:aiHeaders(),body:JSON.stringify({model:AI_MODEL,max_tokens:1200,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const d=await res.json();const txt=d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
     let info={};try{const m=txt.match(/\{[\s\S]*\}/);if(m)info=JSON.parse(m[0]);}catch(e){document.getElementById("port-ai-sum").textContent=txt;document.getElementById("port-ld").style.display="none";return;}
@@ -2618,6 +2684,7 @@ function renderAllList(){
 }
 
 // ===== SHIP LIST =====
+function setShipChip(btn,type){
   document.querySelectorAll(".mar-chips .chip").forEach(b=>b.classList.remove("on"));
   btn.classList.add("on");shipChip=type;renderShipList();
 }
@@ -2820,11 +2887,14 @@ function initMaritime(){
 // ============================================================
 // ===== INIT =====
 showPanelEmpty();
+if(CFG.aisStream){const ak=document.getElementById('ais-key');if(ak)ak.value=CFG.aisStream;}
+if(CFG.cesium){const it=document.getElementById('ion-token');if(it)it.value=CFG.cesium;}
 setSbMode('aerial');
 loadFlights();
 refInt=setInterval(loadFlights, 15000);
 resizeMap();
 initMaritime();
+if(CFG.aisStream)setTimeout(connectAISStream,1500);
 </script>
 </body>
 </html>
